@@ -5,6 +5,9 @@ Last modified: March 25 2020
 """
 
 
+class FormatError(Exception):
+    pass
+
 class Comment(object):
     """
     A class to initialize a Comment object.
