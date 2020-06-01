@@ -1,28 +1,29 @@
 """
-Script to be run for research.
-
-Everytime you open up a csv reader object and iterate through it, you cannot iterate
-through it again. Thus, everytime that I want to access the spreadsheet data I
-must create a new csv reader object.
+Script to be run. It first extracts named entities from a file with scrapped Reddit
+comment data. It then takes all of the named entities mentioned in the scrapped
+file and narrows down the list to those mentioning players from the New York
+Knicks basketball team.
 
 I used the allennlp module's named entity recognition model to extract mentions
-of players from the data that I collected and stored in the program.
+of named entities from the data that I collected and stored in the program. I
+used the pandas module which provided methods to input and manipulate data from
+csv files and then export new data into csv files.
 
 Creator: Sebastian Guo
-Last modified: March 29 2020
+Last modified: May 29 2020
 """
-import csv
-import commentData
 import extraction
+import nameMatching
+import allennlp
+import pandas
+from allennlp.predictors.predictor import Predictor
+import allennlp_models.ner.crf_tagger
 
-with open("/home/sebastianguo/Documents/Research/data/mediumSample.csv", newline='') as csvfile1:
-    columnReader = csv.reader(csvfile1)
-    columnIndicesDict = extraction.colTitleIndices(columnReader)
-
-with open("/home/sebastianguo/Documents/Research/data/mediumSample.csv", newline='') as csvfile2:
-    dataReader = csv.reader(csvfile2)
-    commentDataList = extraction.extractColData(dataReader, columnIndicesDict)
-print(commentDataList)
-
-# predictor = Predictor.from_path("https://s3-us-west-2.amazonaws.com/allennlp/models/ner-model-2018.12.18.tar.gz")
-# print(predictor.predict(sentence="Never crossed your mind that he just isn\x19t good though?"))
+with open("/home/sebastianguo/Documents/Research/data/tester1.csv", newline='') as csvfile1:
+    reader = pandas.read_csv(csvfile1)
+    commentDataList = extraction.extractColData(reader)
+    print(commentDataList)
+    nameMatching.aggregate(commentDataList)
+    # globalIDList = extraction.getGlobalID(reader)
+    # for term in globalIDList:
+    #     extraction.createDataFrame(term, commentDataList)
