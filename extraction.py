@@ -1,139 +1,192 @@
 """
 Module to extract names of players from an Excel spreadsheet.
-I used the csv module to input and read the spreadsheet containing Reddit comment data.
+Used the pandas module to input and read the spreadsheet containing Reddit
+comment data.
+
 Creator: Sebastian Guo
-Last modified: March 30 2020
+Last modified: May 29 2020
 """
-
-import csv
-import commentData
 from allennlp.predictors.predictor import Predictor
+import allennlp_models.ner.crf_tagger
+import pandas
+import commentData
 
-
-def colTitleIndices(readerObj):
+def createDataFrame(globalID, twoDList):
     """
-    Assigns to an empty dictionary the key-value pairs that correspond to the
-    column names global_ID, local_ID, and comment and their associated column numbers.
-    Returns the dictionary. The order of the dictionary key-value pairs does not
-    matter.
+    Returns a csv file after making a DataFrame object with four columns: global_ID,
+    local_ID, name, and type. Using the global ID attribute, all of the rows in the
+    DataFrame should have the same global ID.
 
-    If one of the column names does not exist, the function returns None. Also if
-    the column names are not in the first row of the spreadsheet that is associated
-    with the readerObj, the function also returns None. These assumptions make sure
-    that the spreadsheet with the data is inputted/formatted correctly
-    (necessary column names exist and column names are in the irst row).
+    Parameter globalID: the global ID corresponding to a Reddit thread. For this
+    specific global ID, extract the data from the 2DList.
+    Precondition: must be an integer greater than zero.
 
-    If the first row has two instances of one of the column names, the first one
-    is used.
-
-    The function also takes in as an input, a reader object which allows a csv
-    file to be read line by line.
-
-    Note about assert statement: Technically, since _colTitleIndices is a private
-    method, it is not necessary to enforce preconditions. However, just to be safe,
-    I asserted that readerObj is a csv reader object.Since you create a reader object
-    by calling the csv.reader() method (which doesn't seem to be a constructor but
-    only returns a reader object), I couldn't use isinstance() with the readerObj
-    and the class Reader. Therefore, to assert that readerObj is a csv reader object,
-    I create an empty csv file called enforcer.csv. Through this, I was able to
-    assert that readerObj was an object of the csv reader class was by comparing
-    it to another csv file's type (which we know is a csv reader object).
-
-    Parameter readerObj: the csv reader object with the csvfile that you want
-    to extract the data of the column numbers from.
-    Precondition: must be a csv reader object.
+    Parameter twoDList: a two-dimensional list that has as one of these three entries:
+    1) a list of the form [global ID, local ID, name, type]
+    2) ["0-2 char"] - if the comment corresponding to a global/local ID is less
+    than two characters.
+    3) [global ID] - if the comment corresponding to a global/local ID has no named
+    entities.
     """
-    assert isinstance(readerObj, type(csv.reader("/home/sebastianguo/Documents/Research/data/enforcer.csv"))), repr(readerObj) + " is not a csv reader object."
-    colNumDict = {}
-    rowNum = 0
-    for row in readerObj:
-        columnNum = 0 # want to rest columnNum after each row
-        rowNum += 1
-        for term in row:
-            columnNum += 1
-            if term == "global_ID" and rowNum == 1 and "global_ID" not in colNumDict:
-                colNumDict["global_ID"] = columnNum
-            elif term == "local_ID" and rowNum == 1 and "local_ID" not in colNumDict:
-                colNumDict["local_ID"] = columnNum
-            elif term == "comment" and rowNum == 1 and "comment" not in colNumDict:
-                colNumDict["comment"] = columnNum
-    return colNumDict if (len(colNumDict.items()) == 3) else  None
+    dict = {"global_ID":[], "local_ID":[], "name":[], "type":[]}
+    for lst in twoDList:
+        # if the comment has less than 2 characters or has no named entities, add
+        # an the global and local ID, but no named entity of type.
+        if (len(lst) == 2 and globalID == lst[0]):
+            dict["global_ID"].append(globalID)
+            dict["local_ID"].append(lst[1])
+            dict["name"].append("")
+            dict["type"].append("")
+        elif (len(lst) == 4 and globalID == lst[0]):
+            dict["global_ID"].append(globalID)
+            dict["local_ID"].append(lst[1])
+            dict["name"].append(lst[2])
+            dict["type"].append(lst[3])
+    df = pandas.DataFrame(dict)
+    df.to_csv(r'/home/sebastianguo/Documents/Research/csv-files/' + str(globalID) + ".csv", index=False)
 
-def extractColData(readerObj, indexDict):
+def extractColData(readerObj):
     """
-    Returns a two dimensional list. Each inner list corresponds to one comment/row
-    in the csv file corresponding to the inputted csv reader object. For each inner
-    list of the returned two dimensional list, it will contain three terms: the global_ID,
-    local_ID, and comment that is connected to a user comment. All three of these
-    values should be assigned values and never be empty. All global_IDs and local_IDs
-    must be integers and the comments must be strings.
+    Returns a two dimensional list. Each inner list corresponds to a named entity,
+    its type (person, place, etc.) with its associated global and local ID. All
+    global_IDs and local_IDs must be integers. Comments can be of any type, but
+    will be cast into strings.
 
-    The readerObj should be the same csv file from which the indexDict was found.
-    Since the precondition for readerObj specifies that it has to only be a csv
-    object but nothing more, the function checks that the csv reasader object is
-    formatted correctly with the three necessary headers in the first row and
-    nowhere else. If readerObj is not formatted correctly or the column terms
-    are incorrect, return None.
+    If the csv file does not have columns global_ID, local_ID, and comment, raise an
+    FormatError. If the csv file has headers but they are not in the first row,
+    raise a FormatError as well.
 
-    According to the precondition, the order of the three keys in indexDict do
-    not matter. The function will rearrange the 2D list order to make the
-    keys go "global_ID", "local_ID", and "comment". Doing this allows for every
-    inner list in the outputted two dimensional list contain the same ordering.
+    If the types of the columns are incorrect, raise a TypeError. To check
+    the types, the pandas module has a method dtypes. For a column with multiple
+    types, calling the dtypes method returns object.
+
+    Assume that for every global_ID and local_ID, there is an associated comment
+    in that row. This means that the the number of elements in each of the
+    three columns is the same. If the function fails to extract the data in any
+    way, raise an exception.
+
+    The order of the three columns in readerObj does not matter. The function will
+    rearrange the 2D list order to make the keys go "global_ID", "local_ID", and
+    "named entity/type".
 
     Parameter readerObj: the csv reader object with the csvfile that you want
     to extract the data from.
-    Precondition: must be a csv reader object (asserting this is the same as the
-    function colTitleIndices).
-
-    Parameter indexDict: the dictionary that contains the keys "global_ID",
-    "local_ID", and "comment". The values associated with these keys are the column
-    numbers of the spreadsheet headers.
-    Precondition: must be of type dictionary and must contain the three key names
-    mentioned above (order doesn't matter, will be corrected in the function).
+    Precondition: must be a csv reader object
     """
-    assert isinstance(readerObj, type(csv.reader("/home/sebastianguo/Documents/Research/data/enforcer.csv"))), repr(readerObj) + " is not a csv reader object."
-    assert type(indexDict) == dict, repr(indexDict) + " is not of type dictionary."
-    assert len(indexDict) == 3, repr(indexDict) + " is not length three."
-    assert "global_ID" in indexDict and "local_ID" in indexDict and "comment" in indexDict, repr(indexDict) + " does not contain the correct keys"
+    assert type(readerObj) == pandas.core.frame.DataFrame, \
+        repr(readerObj) + " is not a csv reader object."
+
+    if not _checkColIndices(readerObj):
+        raise commentData.FormatError("The csv file is either incorrectly formatted or a column header is missing.")
+    if (readerObj["global_ID"].dtypes != int or readerObj["local_ID"].dtypes != int):
+        raise TypeError("The types of the columns are incorrect.")
+
+    columns = readerObj.columns
+    globID = readerObj["global_ID"]
+    locID = readerObj["local_ID"]
+    comm = readerObj["comment"]
     twoDList = []
-    rowNum = 0
-    for row in readerObj:
-        rowNum += 1
-        if rowNum != 1 and ("global_ID" in row or "local_ID" in row or "comment" in row):
-            return None
-        elif rowNum == 1 and ("global_ID" not in row or "local_ID" not in row or "comment" not in row):
-            return None
-        try:
-            if rowNum != 1:
-                twoDList.append([int(row[indexDict["global_ID"]-1]), int(row[indexDict["local_ID"]-1]), str(row[indexDict["comment"]-1])])
-        except:
-            return None
+    # every comment is unique in its glob/loc ID. Maintain list of past IDs to
+    # prevent having duplicate comments. Within a single comment, however, it is
+    # fine to have multiples of a single named entity (in fact, we want that).
+    duplicates = []
+    for index in range(readerObj.shape[0]):
+        if [globID[index], locID[index]] not in duplicates:
+            try:
+                _extractEntities(twoDList, globID[index], locID[index], comm[index])
+            except:
+                raise Exception("Failed to create list of data.")
+        duplicates.append([globID[index], locID[index]])
+        print(index)
     return twoDList
 
-def storeAsObjects(twoDList):
+def getGlobalID(readerObj):
     """
-    Function that returns a one-dimensional list with each term corresponding to
-    a pointer to a Comment object. While the function extractColData returns a
-    two-dimensional list, this function makes the way to store the data found from
-    extractColData with the lists of named entities in the comments. Although it
-    is possible to add the names of the players to the 2D list, that would be
-    difficult to read so putting all of the data for a single comment into an
-    object allows for ease of access.
+    Returns a list of the global IDs in the csv file. The global ID of a comment
+    distinguishes it from comments in different threads (so two comments in the
+    same thread have the same global ID).
 
-    The name of each pointer is a string
+    If the terms in the column don't have the correct type, raise a TypeError.
 
-    The inputted twoDList is the return output of the function extractColData.
-
-    Parameter twoDList: a two dimensional list. Each one dimensional list within it
-    has three terms: global_ID, local_ID, and a comment.
-    Precondition: twoDList must be a two-dimensional list. Ever term inside of the
-    2D list must also be a list. Each of these list terms must contain three
-    values. The first two must be integers and the third/last one must be a string.
+    Parameter readerObj: the csv reader object with the csvfile that you want
+    to extract the global IDs from.
+    Precondition: must be a csv reader object.
     """
-    asssert type(twoDList) == list, repr(twoDList) + " is not of type list."
-    for term in twoDList:
-        assert type(term) == list, "The terms inside of twoDList are not all lists."
-        assert len(term) == 3, "The length of term " + repr(term) + " is not three."
-        assert type(term[0]) == int and type(term[1]) == int and type(term[2]) == str, "The types of the 1D lists are invalid."
-    for oneDList in twoDList:
-        
+    assert type(readerObj) == pandas.core.frame.DataFrame, \
+        repr(readerObj) + " is not a csv reader object."
+
+    try:
+        col = readerObj["global_ID"]
+    except:
+        raise Exception("The csv file does not contain a global_ID header.")
+    if (readerObj["global_ID"].dtypes != int):
+        raise TypeError("The type of the column global_ID are not all integers.")
+    globalIDList = []
+    # add non-duplicate IDs to the globalIDList
+    for item in col:
+        if item not in globalIDList:
+            globalIDList.append(item)
+    return globalIDList
+
+
+def _checkColIndices(readerObj):
+    """
+    Returns true is the file contains the column names global_ID, local_ID, and
+    comment. If one of the column names does not exist, the function returns false.
+    If the columns have headers but they are not in the first row, return false
+    (to ensure proper formatting of the csv file). If two columns exist with the
+    same header, the function only looks at the column with the smallest index
+    and should still return true provided all three headers exist.
+
+    Parameter readerObj: the csv reader with the file that you want
+    to extract the data of the column numbers from.
+    Precondition: must be a DataFrame object from the pandas python module.
+    """
+    assert type(readerObj) == pandas.core.frame.DataFrame, \
+        repr(readerObj) + " is not a csv reader object."
+
+    colNumDict = {}
+    columns = readerObj.columns
+    try:
+        colNumDict["global_ID"] = columns.get_loc("global_ID")
+        colNumDict["local_ID"] = columns.get_loc("local_ID")
+        colNumDict["comment"] = columns.get_loc("comment")
+    except:
+        pass
+    if len(colNumDict) == 3:
+        return True
+    else:
+        return False
+
+def _extractEntities(list, glob, loc, comment):
+    """
+    Returns a 2D list with 1D lists as named entities/types(person, place, etc.).
+    Uses the AllenNLP module to find the named entities. If the comment contains
+    no named entities, return [global ID, local ID]. If the length of the string
+    is too small for the AllenNLP to work, return [global ID, local ID].
+
+    Parameter comment: a comment from a Reddit thread.
+    Precondition: comment must be a string.
+    """
+    try:
+        predictor = Predictor.from_path("https://storage.googleapis.com/allennlp-public-models/ner-model-2020.02.10.tar.gz")
+        # the allenNLP algorithm returns a dictionary. For my purpose, I only need
+        # two of the key-value pairs: the words and the tags/types of the words.
+        rawDictionary = predictor.predict(sentence=comment)
+        allWords = rawDictionary["words"]
+        tags = rawDictionary["tags"]
+        counter = 0
+        flag = False
+        for word in tags:
+            if word != "O":
+                list.append([glob, loc, allWords[counter],word])
+                flag = True
+            counter += 1 # prevents assigning a wrong word if two words have the same tag
+        if not flag:
+            # If there is a comment more than 2 characters but has no named entities
+            list.append([glob, loc])
+    except:
+        # If the comment is less than or equal to 2 characters, than treat as
+        # if the comment has no named entities
+        list.append([glob, loc])
+    return list
