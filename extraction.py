@@ -4,56 +4,59 @@ Used the pandas module to input and read the spreadsheet containing Reddit
 comment data.
 
 Creator: Sebastian Guo
-Last modified: May 29 2020
+Last modified: June 5 2020
 """
 from allennlp.predictors.predictor import Predictor
 import allennlp_models.ner.crf_tagger
 import pandas
 import commentData
+import nameMatching
+import string
 
 def createDataFrame(globalID, twoDList):
     """
     Returns a csv file after making a DataFrame object with four columns: global_ID,
-    local_ID, name, and type. Using the global ID attribute, all of the rows in the
-    DataFrame should have the same global ID.
+    local_ID, name, and the category. Using the global ID attribute, all of the
+    rows in the DataFrame should have the same global ID.
 
     Parameter globalID: the global ID corresponding to a Reddit thread. For this
     specific global ID, extract the data from the 2DList.
     Precondition: must be an integer greater than zero.
 
     Parameter twoDList: a two-dimensional list that has as one of these three entries:
-    1) a list of the form [global ID, local ID, name, type]
+    1) a list of the form [global ID, local ID, name, category]
     2) ["0-2 char"] - if the comment corresponding to a global/local ID is less
     than two characters.
     3) [global ID] - if the comment corresponding to a global/local ID has no named
     entities.
     """
-    dict = {"global_ID":[], "local_ID":[], "name":[], "type":[]}
+    dict = {"global_ID":[], "local_ID":[], "name":[], "category":[]}
     for lst in twoDList:
         # if the comment has less than 2 characters or has no named entities, add
-        # an the global and local ID, but no named entity of type.
+        # an the global and local ID, but no named entity or category.
         if (len(lst) == 2 and globalID == lst[0]):
             dict["global_ID"].append(globalID)
             dict["local_ID"].append(lst[1])
             dict["name"].append("")
-            dict["type"].append("")
+            dict["category"].append("")
         elif (len(lst) == 4 and globalID == lst[0]):
             dict["global_ID"].append(globalID)
             dict["local_ID"].append(lst[1])
             dict["name"].append(lst[2])
-            dict["type"].append(lst[3])
+            dict["category"].append(lst[3])
     df = pandas.DataFrame(dict)
     df.to_csv(r'/home/sebastianguo/Documents/Research/csv-files/' + str(globalID) + ".csv", index=False)
 
-def extractColData(readerObj):
+def extractColData(rawDataFile, playerNameFile):
     """
     Returns a two dimensional list. Each inner list corresponds to a named entity,
-    its type (person, place, etc.) with its associated global and local ID. All
-    global_IDs and local_IDs must be integers. Comments can be of any type, but
-    will be cast into strings.
+    its category (person, place, nickname) with its associated global and local ID. All
+    global_IDs and local_IDs must be integers. Comments can be of any category, but
+    will be cast into strings. The function also checks if the comments have
+    nicknames as named entities.
 
-    If the csv file does not have columns global_ID, local_ID, and comment, raise an
-    FormatError. If the csv file has headers but they are not in the first row,
+    If the raw data file does not have columns global_ID, local_ID, and comment, raise an
+    FormatError. If the raw data file has headers but they are not in the first row,
     raise a FormatError as well.
 
     If the types of the columns are incorrect, raise a TypeError. To check
@@ -65,61 +68,73 @@ def extractColData(readerObj):
     three columns is the same. If the function fails to extract the data in any
     way, raise an exception.
 
-    The order of the three columns in readerObj does not matter. The function will
+    The order of the three columns in rawDataFile does not matter. The function will
     rearrange the 2D list order to make the keys go "global_ID", "local_ID", and
-    "named entity/type".
+    "named entity/category".
 
-    Parameter readerObj: the csv reader object with the csvfile that you want
+    Parameter rawDataFile: the reader object with the csvfile that you want
     to extract the data from.
-    Precondition: must be a csv reader object
+    Precondition: must be a DataFrame object created from the pandas module
+
+    Parameter playerNameFile: the reader object containing nicknames to check for in
+    the comments.
+
+    Precondition: must be a DataFrame object created from the pandas module
     """
-    assert type(readerObj) == pandas.core.frame.DataFrame, \
-        repr(readerObj) + " is not a csv reader object."
+    assert type(rawDataFile) == pandas.core.frame.DataFrame, \
+        repr(rawDataFile) + " is not a csv reader object."
+    assert type(playerNameFile) == pandas.core.frame.DataFrame, \
+        repr(playerNameFile) + " is not a csv reader object."
 
-    if not _checkColIndices(readerObj):
+    if not _checkColIndices(rawDataFile):
         raise commentData.FormatError("The csv file is either incorrectly formatted or a column header is missing.")
-    if (readerObj["global_ID"].dtypes != int or readerObj["local_ID"].dtypes != int):
+    if (rawDataFile["global_ID"].dtypes != int or rawDataFile["local_ID"].dtypes != int):
         raise TypeError("The types of the columns are incorrect.")
+    try:
+        playerNameFile["nicknames"]
+    except:
+        raise Exception("The nickname file does not have the column 'nickname'.")
 
-    columns = readerObj.columns
-    globID = readerObj["global_ID"]
-    locID = readerObj["local_ID"]
-    comm = readerObj["comment"]
+    globID = rawDataFile["global_ID"]
+    locID = rawDataFile["local_ID"]
+    comm = rawDataFile["comment"]
     twoDList = []
     # every comment is unique in its glob/loc ID. Maintain list of past IDs to
     # prevent having duplicate comments. Within a single comment, however, it is
     # fine to have multiples of a single named entity (in fact, we want that).
     duplicates = []
-    for index in range(readerObj.shape[0]):
+    for index in range(rawDataFile.shape[0]):
         if [globID[index], locID[index]] not in duplicates:
             try:
+                # uppercase = string.capwords(comm[index])
                 _extractEntities(twoDList, globID[index], locID[index], comm[index])
+                _findNickname(twoDList, globID[index], locID[index], comm[index], playerNameFile)
             except:
-                raise Exception("Failed to create list of data.")
+                raise Exception("Failed to create 2D list of named entities.")
         duplicates.append([globID[index], locID[index]])
         print(index)
     return twoDList
 
-def getGlobalID(readerObj):
+def getGlobalID(rawDataFile):
     """
-    Returns a list of the global IDs in the csv file. The global ID of a comment
+    Returns a list of the global IDs in the scrapped data file. The global ID of a comment
     distinguishes it from comments in different threads (so two comments in the
     same thread have the same global ID).
 
     If the terms in the column don't have the correct type, raise a TypeError.
 
-    Parameter readerObj: the csv reader object with the csvfile that you want
+    Parameter rawDataFile: the reader object with the csvfile that you want
     to extract the global IDs from.
-    Precondition: must be a csv reader object.
+    Precondition: must be a DataFrame object created from the pandas module.
     """
-    assert type(readerObj) == pandas.core.frame.DataFrame, \
-        repr(readerObj) + " is not a csv reader object."
+    assert type(rawDataFile) == pandas.core.frame.DataFrame, \
+        repr(rawDataFile) + " is not a csv reader object."
 
     try:
-        col = readerObj["global_ID"]
+        col = rawDataFile["global_ID"]
     except:
         raise Exception("The csv file does not contain a global_ID header.")
-    if (readerObj["global_ID"].dtypes != int):
+    if (rawDataFile["global_ID"].dtypes != int):
         raise TypeError("The type of the column global_ID are not all integers.")
     globalIDList = []
     # add non-duplicate IDs to the globalIDList
@@ -129,7 +144,7 @@ def getGlobalID(readerObj):
     return globalIDList
 
 
-def _checkColIndices(readerObj):
+def _checkColIndices(rawDataFile):
     """
     Returns true is the file contains the column names global_ID, local_ID, and
     comment. If one of the column names does not exist, the function returns false.
@@ -138,15 +153,15 @@ def _checkColIndices(readerObj):
     same header, the function only looks at the column with the smallest index
     and should still return true provided all three headers exist.
 
-    Parameter readerObj: the csv reader with the file that you want
+    Parameter rawDataFile: the reader with the file that you want
     to extract the data of the column numbers from.
     Precondition: must be a DataFrame object from the pandas python module.
     """
-    assert type(readerObj) == pandas.core.frame.DataFrame, \
-        repr(readerObj) + " is not a csv reader object."
+    assert type(rawDataFile) == pandas.core.frame.DataFrame, \
+        repr(rawDataFile) + " is not a csv reader object."
 
     colNumDict = {}
-    columns = readerObj.columns
+    columns = rawDataFile.columns
     try:
         colNumDict["global_ID"] = columns.get_loc("global_ID")
         colNumDict["local_ID"] = columns.get_loc("local_ID")
@@ -158,9 +173,9 @@ def _checkColIndices(readerObj):
     else:
         return False
 
-def _extractEntities(list, glob, loc, comment):
+def _extractEntities(lst, glob, loc, comment):
     """
-    Returns a 2D list with 1D lists as named entities/types(person, place, etc.).
+    Returns a 2D list with 1D lists as named entities/categories(person, place, etc.).
     Uses the AllenNLP module to find the named entities. If the comment contains
     no named entities, return [global ID, local ID]. If the length of the string
     is too small for the AllenNLP to work, return [global ID, local ID].
@@ -179,14 +194,28 @@ def _extractEntities(list, glob, loc, comment):
         flag = False
         for word in tags:
             if word != "O":
-                list.append([glob, loc, allWords[counter],word])
+                lst.append([glob, loc, allWords[counter],word])
                 flag = True
             counter += 1 # prevents assigning a wrong word if two words have the same tag
         if not flag:
             # If there is a comment more than 2 characters but has no named entities
-            list.append([glob, loc])
+            lst.append([glob, loc])
     except:
         # If the comment is less than or equal to 2 characters, than treat as
         # if the comment has no named entities
-        list.append([glob, loc])
-    return list
+        lst.append([glob, loc])
+    return lst
+
+def _findNickname(lst, glob, loc, comment, nicknameFile):
+    """
+    Checks and adds to list any mentions of named entities as nicknames.
+    """
+    nicknames = nameMatching.createList(nicknameFile, "nicknames")
+    for name in nicknames:
+        if type(name) == list:
+            for term in name:
+                if term in comment and " " in term:
+                    lst.append([glob, loc, term, "U-PER"])
+        elif type(name) != list:
+            if name in comment and " " in name:
+                lst.append([glob, loc, name, "U-PER"])
