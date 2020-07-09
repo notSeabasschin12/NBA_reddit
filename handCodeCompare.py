@@ -1,12 +1,14 @@
 """
 Module to check the accuracy of csv files created in module nameMatching and extraction_v2
 according to provided hand code.
+
+Creator: Sebastian Guo
 """
 import pandas
 import numpy
 
 
-def compareFiles(machineCodeFile, groundTruthFile, playerList):
+def compareFiles(machineCodeFile, groundTruthFile, playerList, team):
     """
     Compare the machineCodeFile created by nameMatching function commentPlayers
     to a generated file groundTruthFile to look at the accuracy of commentFile.
@@ -33,8 +35,11 @@ def compareFiles(machineCodeFile, groundTruthFile, playerList):
 
     Parameter playerList: a list of strings with players to compare the csvfile to.
     Precondition: playerList must be a list with string entries.
+
+    Parameter team: the basketball team the code is run on.
+    Precondition: team is of type string
     """
-    _assertionCompareFiles(machineCodeFile, groundTruthFile, playerList)
+    _assertionCompareFiles(machineCodeFile, groundTruthFile, playerList, team)
     matrixOne = _createMatrix(numpy.empty((0, len(machineCodeFile)), int), machineCodeFile, playerList)
     matrixTwo = _createMatrix(numpy.empty((0, len(machineCodeFile)), int), groundTruthFile, playerList)
     matrixDiff = numpy.subtract(matrixTwo, matrixOne)
@@ -46,7 +51,7 @@ def compareFiles(machineCodeFile, groundTruthFile, playerList):
     _addValues(appendDict, matrixSum, matrixDiff, playerList)
     df = pandas.DataFrame(appendDict)
     df2 = groundTruthFile.append(df, ignore_index=True)
-    df2.to_csv(r'/home/sebastianguo/Documents/Research/data/precisionAndRecall.csv', index=False)
+    df2.to_csv(r'/home/sebastianguo/Documents/Research/Teams/' + team + '/precisionAndRecall.csv', index=False)
 
 def _addValues(dictionary, matrixSum, matrixDiff, playerList):
     """
@@ -96,7 +101,7 @@ def _createMatrix(matrix, commentFile, playerList):
     matrix = numpy.nan_to_num(matrix)
     return matrix
 
-def _assertionCompareFiles(machineCodeFile, groundTruthFile, playerList):
+def _assertionCompareFiles(machineCodeFile, groundTruthFile, playerList, team):
     """
     Function to maintain assertions for function compareFiles.
     """
@@ -113,3 +118,4 @@ def _assertionCompareFiles(machineCodeFile, groundTruthFile, playerList):
     assert type(playerList) == list, repr(playerList) + " is not a list."
     for term in playerList:
         assert type(term) == str, repr(term) + " is not a string."
+    assert type(team) == str, repr(team) + " is not a string."

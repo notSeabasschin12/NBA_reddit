@@ -10,41 +10,6 @@ import pandas
 import numpy
 import csv
 
-def aggregate(commentDataList):
-    """
-    Creates a csv file based off of an inputted list of named entities. The csv file
-    contains the total mentions of each named entity (names, places, organizations)
-    in the commentDataList created  by calling the method extractColData. The
-    function extractColData from the extraction module creates a two-dimensional
-    list with data about the named entity.
-
-    Parameter commentDataList: A list containing named entities and their types.
-    Precondition: Must be a two-dimensional list with inner entities as lists.
-    The inner entries can either be a list with four terms (global ID, local ID,
-    named entity, category) or a list with two terms (global ID and local ID). If
-    the inner list only has two terms, that means that the associated comment has
-    no named entities and will not affect the aggregate list of this function.
-    """
-    assert type(commentDataList) == list, repr(commentDataList) + " is not a list."
-    for term in commentDataList:
-        assert type(term) == list, repr(term) + " is not a list."
-        assert len(term) == 2 or len(term) == 4, repr(term) + " is not of correct length."
-
-    totMent = {"named entity": [], "category": [], "mentions": []}
-    for lst in commentDataList:
-        if len(lst) == 4 and (lst[2] not in totMent["named entity"]):
-            # If named entity not in list, add entity to dictionary
-            totMent["named entity"].append(lst[2])
-            totMent["category"].append(lst[3])
-            totMent["mentions"].append(1)
-        elif len(lst) == 4 and (lst[2] in totMent["named entity"]):
-            # If named entity in list, increase mentions by one
-            index = totMent["named entity"].index(lst[2])
-            totMent["mentions"][index] += 1
-    df = pandas.DataFrame(totMent)
-    df.to_csv(r'/home/sebastianguo/Documents/Research/data/total.csv', index=False)
-
-
 def findPlayerNames(playerNameFile):
     """
     Returns a list of strings of player names from a given csv file. The inputted
@@ -67,59 +32,110 @@ def findPlayerNames(playerNameFile):
         lst.append(players[index])
     return lst
 
-def playerMentions(playerNameFile, totalFile, playerList):
+def playerMentions(commentDataList, playerNameFile, playerList, team):
     """
-    Creates a csv file that contains whether or not a named entity from the inputted
-    csvfile refers to a player on the New York Knicks Basketball team. The
-    inputted csvfile is one that is created from the method aggregate in the
-    module nameMatching. While the file created has the same three columns as the
-    inputted csvfile, this function still creates a different csv file. playerNameFile
-    contains data about the names of the New York Knicks basketball team and any
-    associated nicknames. If the csvfile does not contain the three necessary columns,
-    return a FormatError.
+    Creates a csv file based off of an inputted list of named entities. The csv file
+    contains the total mentions of each named entity (names, places, organizations)
+    in the commentDataList created by calling the method extractColData. The
+    function extractColData from the extraction module creates a two-dimensional
+    list with data about the named entity.
+
+    The function also marks the player on the basketball team that the named entity
+    corresponds to. playerNameFile contains data about the names of the basketball
+    team and any associated nicknames.
+
+    Parameter commentDataList: A list containing named entities and their types.
+    Precondition: Must be a two-dimensional list with inner entities as lists.
+    The inner entries can either be a list with four terms (global ID, local ID,
+    named entity, category) or a list with two terms (global ID and local ID). If
+    the inner list only has two terms, that means that the associated comment has
+    no named entities and will not affect the aggregate list of this function.
 
     Parameter playerNameFile: a reader object that contains information about player
     names and nicknames.
     Precondition: must be a DataFrame object created by the pandas module.
 
-    Parameter totalFile: a reader object that contains information about the total
-    times a player is mentioned.
-    Precondition: must be a DataFrame object created by the pandas module.
-
     Parameter playerList: a list of strings with players to compare the csvfile to.
     Precondition: playerList must be a list with string entries.
+
+    Parameter team: the basketball team the code is run on.
+    Precondition: team is of type string
     """
-    _assertionPlayerMentions(playerNameFile, totalFile, playerList)
-    endDict = {}
+    _assertionPlayerMentions(commentDataList, playerNameFile, playerList, team)
+
+    totMent = {"named entity": [], "category": [], "mentions": []}
+    for lst in commentDataList:
+        if len(lst) == 4 and (lst[2] not in totMent["named entity"]):
+            # If named entity not in list, add entity to dictionary
+            totMent["named entity"].append(lst[2])
+            totMent["category"].append(lst[3])
+            totMent["mentions"].append(1)
+        elif len(lst) == 4 and (lst[2] in totMent["named entity"]):
+            # If named entity in list, increase mentions by one
+            index = totMent["named entity"].index(lst[2])
+            totMent["mentions"][index] += 1
+    length = len(totMent["named entity"])
+    for player in playerList:
+        totMent[player] = [""] * length
+    for index in range(length):
+        name = _matchPlayer(playerNameFile, totMent["named entity"][index], _createList(playerNameFile, "Player"),
+            _createList(playerNameFile, "first short"), _createList(playerNameFile, "last short"), _createList(playerNameFile, "nicknames"))
+        if name != "":
+            totMent[name][index] = 1
+    df = pandas.DataFrame(totMent)
+    df.to_csv(r'/home/sebastianguo/Documents/Research/Teams/' + team + '/aggRosterMentions.csv', index=False)
+
+def playerMentionsGlob(gameFile, playerNameFile, playerList, team):
+    """
+    Creates a csv file based off an inputted list commentDataList. The outputted
+    csv files contains, for a certain thread/game, the total mentions of each named
+    entity and the player that corresponds to the named entity in playerList.
+    This function is similar to playerMentions(), except it sorts the csv files
+    by thread.
+
+    Parameter gameFile: A csv file created from function createDataFrame().
+    Precondition: Must contain the headers "global_ID", "local_ID" and "name" and
+    "category". Must be a csv file reader object.
+
+    Parameter playerNameFile: a reader object that contains information about player
+    names and nicknames.
+    Precondition: must be a DataFrame object created by the pandas module.
+
+    Parameter playerList: A list of the players on the team.
+    Precondition: Must be a list with entries as strings.
+
+    Parameter team: the basketball team the code is run on.
+    Precondition: team is of type string
+    """
+    _assertionPlayerMentionsGlob(gameFile, playerNameFile, playerList, team)
     try:
-        names = totalFile["named entity"]
-        endDict["named entity"] = names
-        endDict["category"] = totalFile["category"]
-        endDict["mentions"] = totalFile["mentions"]
+        glob = gameFile["global_ID"]
+        loc = gameFile["local_ID"]
+        name = gameFile["name"]
+        cat = gameFile["category"]
     except:
         raise commentData.FormatError("The csv file does not contain the correct headers.")
-    length = len(names)
-    rowsStuff = []
+
+    totMent = {"named entity": [], "category": [], "mentions": []}
+    for index in range(gameFile.shape[0]):
+        if not pandas.isnull(name[index]) and name[index] not in totMent["named entity"]:
+            totMent["named entity"].append(name[index])
+            totMent["category"].append(cat[index])
+            totMent["mentions"].append(1)
+        elif not pandas.isnull(name[index]) and name[index] in totMent["named entity"]:
+            place = totMent["named entity"].index(name[index])
+            totMent["mentions"][place] += 1
+    length = len(totMent["named entity"])
     for player in playerList:
-        endDict[player] = [""] * length
-
-    nameList = _createList(playerNameFile, "Player")
-    listFSho = _createList(playerNameFile, "first short")
-    listLSho = _createList(playerNameFile, "last short")
-    listNick = _createList(playerNameFile, "nicknames")
-    for index in range(totalFile.shape[0]):
-        name = _matchPlayer(playerNameFile, names[index], nameList, listFSho, listLSho, listNick)
+        totMent[player] = [""] * length
+    for number in range(length):
+        name = _matchPlayer(playerNameFile, totMent["named entity"][number], _createList(playerNameFile, "Player"), _createList(playerNameFile, "first short"), _createList(playerNameFile, "last short"), _createList(playerNameFile, "nicknames"))
         if name != "":
-            endDict[name][index] = 1
-            rowsStuff.append(index)
-    df = pandas.DataFrame(endDict)
-    for rowNum in rowsStuff:
-        target_row = rowNum
-        idx = [target_row] + [i for i in range(len(df)) if i != target_row]
-        df = df.iloc[idx]
-    df.to_csv(r'/home/sebastianguo/Documents/Research/data/mentions.csv', index=False)
+            totMent[name][number] = 1
+    df = pandas.DataFrame(totMent)
+    df.to_csv(r'/home/sebastianguo/Documents/Research/Teams/' + team + '/aggRosterMentionsByGame/' + str(glob[0]) + '.csv', index=False)
 
-def commentPlayers(rawDataFile, playerNameFile, playerList, commentDataList):
+def commentPlayers(rawDataFile, playerNameFile, playerList, commentDataList, team):
     """
     Create a csv file that contains individual comments and their unique global
     and local identifiers, plus columns that mark whether or not the comment
@@ -147,8 +163,11 @@ def commentPlayers(rawDataFile, playerNameFile, playerList, commentDataList):
     Precondition: Must be a two-dimensional list with inner entities as lists.
     The inner entries can either be a list with four terms (global ID, local ID,
     named entity, category) or a list with two terms (global ID and local ID).
+
+    Parameter team: the basketball team the code is run on.
+    Precondition: team is of type string
     """
-    _assertionCommentPlayers(rawDataFile, playerNameFile, playerList, commentDataList)
+    _assertionCommentPlayers(rawDataFile, playerNameFile, playerList, commentDataList, team)
     aggDict = {}
     aggDict["global_ID"] = rawDataFile["global_ID"]
     aggDict["local_ID"] = rawDataFile["local_ID"]
@@ -165,9 +184,9 @@ def commentPlayers(rawDataFile, playerNameFile, playerList, commentDataList):
         aggDict = _addPlayerMentions(aggDict, playerNameFile, index, aggDict["global_ID"][index],
             aggDict["local_ID"][index], commentDataList, nameList, listFSho, listLSho, listNick)
     df = pandas.DataFrame(aggDict)
-    df.to_csv(r'/home/sebastianguo/Documents/Research/data/commentMentions.csv', index=False)
+    df.to_csv(r'/home/sebastianguo/Documents/Research/Teams/' + team + '/commentRosterMentions.csv', index=False)
 
-def commentPlayersGlob(commentFile, playerList, global_ID):
+def commentPlayersGlob(commentFile, playerList, global_ID, team):
     """
     A function to create separate csv files sorted by global ID or different games.
     Each csv file contains information similar to the csv file created by
@@ -185,6 +204,9 @@ def commentPlayersGlob(commentFile, playerList, global_ID):
     Parameter global_ID: the global ID which all of the comments outputted by this
     function must have.
     Precondition: global_ID is an integer greater than zero.
+
+    Parameter team: the basketball team the code is run on.
+    Precondition: team is of type string
     """
     assert type(commentFile) == pandas.core.frame.DataFrame, \
         repr(commentFile) + " is not a reader object."
@@ -192,6 +214,7 @@ def commentPlayersGlob(commentFile, playerList, global_ID):
     for term in playerList:
         assert type(term) == str, repr(term) + " is not a string."
     assert type(global_ID) == int and global_ID > 0, repr(global_ID) + " is not an int greater than zero."
+    assert type(team) == str, repr(team) + " is not a string."
 
     dfDict = {"global_ID":[], "local_ID":[], "comment":[]}
     glob = commentFile["global_ID"]
@@ -211,7 +234,7 @@ def commentPlayersGlob(commentFile, playerList, global_ID):
         for rowInd in indexList:
             dfDict[playerList[columnInd]].append(playerMatrix[columnInd][rowInd])
     df = pandas.DataFrame(dfDict)
-    df.to_csv(r'/home/sebastianguo/Documents/Research/data/commentMentionsByGame/' + str(global_ID) + ".csv", index=False)
+    df.to_csv(r'/home/sebastianguo/Documents/Research/Teams/' + team + '/commentRosterMentionsByGame/' + str(global_ID) + ".csv", index=False)
 
 def _createMatrix(matrix, commentFile, playerList):
     """
@@ -274,7 +297,7 @@ def _createList(playerNameFile, colName):
     returnList = []
     for index in range(playerNameFile.shape[0]):
         # If a box is empty in the csv file, the type of that box is float
-        if type(items[index]) == float:
+        if pandas.isnull(items[index]):
             returnList.append("")
         elif "," in items[index]:
             lstNames = items[index].split(",")
@@ -297,19 +320,22 @@ def _addPlayerMentions(dfDictionary, playerNameFile, index, glob, loc, commentDa
                 dfDictionary[name][index] = "1"
     return dfDictionary
 
-def _assertionPlayerMentions(playerNameFile, totalFile, playerList):
+def _assertionPlayerMentions(commentDataList, playerNameFile, playerList, team):
     """
     Function to test assertions for function playerMentions.
     """
+    assert type(commentDataList) == list, repr(commentDataList) + " is not a list."
+    for term in commentDataList:
+        assert type(term) == list, repr(term) + " is not a list."
+        assert len(term) == 2 or len(term) == 4, repr(term) + " is not of correct length."
     assert type(playerNameFile) == pandas.core.frame.DataFrame, \
         repr(playerNameFile) + " is not a csv reader object."
-    assert type(totalFile) == pandas.core.frame.DataFrame, \
-        repr(totalFile) + " is not a csv reader object."
     assert type(playerList) == list, repr(playerList) + " is not a list."
     for term in playerList:
         assert type(term) == str, repr(term) + " is not a string."
+    assert type(team) == str, repr(team) + " is not a string."
 
-def _assertionCommentPlayers(rawDataFile, playerNameFile, playerList, commentDataList):
+def _assertionCommentPlayers(rawDataFile, playerNameFile, playerList, commentDataList, team):
     """
     Function to test assertions for function commentPlayers.
     """
@@ -328,3 +354,17 @@ def _assertionCommentPlayers(rawDataFile, playerNameFile, playerList, commentDat
     for term in commentDataList:
         assert type(term) == list, repr(term) + " is not a list."
         assert len(term) == 2 or len(term) == 4, repr(term) + " is not of correct length."
+    assert type(team) == str, repr(team) + " is not a string."
+
+def _assertionPlayerMentionsGlob(gameFile, playerNameFile, playerList, team):
+    """
+    Function to test assertions for function playerMentionsGlob.
+    """
+    assert type(gameFile) == pandas.core.frame.DataFrame, \
+        repr(totalFile) + " is not a csv reader object."
+    assert type(playerNameFile) == pandas.core.frame.DataFrame, \
+        repr(playerNameFile) + " is not a csv reader object."
+    assert type(playerList) == list, repr(playerList) + " is not of type list."
+    for term in playerList:
+        assert type(term) == str, repr(term) + " is not a string."
+    assert type(team) == str, repr(team) + " is not a string."

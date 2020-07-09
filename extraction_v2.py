@@ -1,5 +1,7 @@
 """
-Module that extracts data from scrapped csv files WITHOUT using the allenNLP.
+Module that extracts data from scrapped csv files without using the allenNLP.
+
+Creator: Sebastian Guo
 """
 import pandas
 import re
@@ -7,7 +9,7 @@ import string
 import commentData
 import nameMatching
 
-def createDataFrame(globalID, twoDList):
+def createDataFrame(globalID, twoDList, team):
     """
     Returns a csv file after making a DataFrame object with four columns: global_ID,
     local_ID, name, and the category. Using the global ID attribute, all of the
@@ -19,14 +21,18 @@ def createDataFrame(globalID, twoDList):
 
     Parameter twoDList: a two-dimensional list that has as one of these two entries:
     1) a list of the form [global ID, local ID, name, category]
-    3) [global ID, local ID] - if the comment corresponding to a global/local ID has no named
+    2) [global ID, local ID] - if the comment corresponding to a global/local ID has no named
     entities.
+
+    Parameter team: the basketball team the code is running on.
+    Precondition: team is a string
     """
     assert type(globalID) == int and globalID > 0, repr(globalID) + " is not an int greater than zero."
     assert type(twoDList) == list, repr(twoDList) + " is not a 2D list."
     for term in twoDList:
         assert type(term) == list and (len(term) == 2 or len(term) == 4), \
             repr(term) + " is not a list or does not contain the correct terms."
+    assert type(team) == str, repr(team) + " is not a string."
     dict = {"global_ID":[], "local_ID":[], "name":[], "category":[]}
     for lst in twoDList:
         # if the comment has less than 2 characters or has no named entities, add
@@ -42,7 +48,7 @@ def createDataFrame(globalID, twoDList):
             dict["name"].append(lst[2])
             dict["category"].append(lst[3])
     df = pandas.DataFrame(dict)
-    df.to_csv(r'/home/sebastianguo/Documents/Research/csv-files/' + str(globalID) + ".csv", index=False)
+    df.to_csv(r'/home/sebastianguo/Documents/Research/Teams/' + team + '/listOfRosterMentionsByGame/' + str(globalID) + ".csv", index=False)
 
 def extractColData(rawDataFile, playerNameFile):
     """
@@ -92,19 +98,18 @@ def extractColData(rawDataFile, playerNameFile):
     lastF = _createList(playerNameFile, "last short")
     nameStr = _makeNameStr(playerNameFile["Player"], playerNameFile["first"], playerNameFile["last"])
     nicknameStr = _makeNicknameStr(_createList(playerNameFile, "nicknames"))
-    total = 0
     for index in range(rawDataFile.shape[0]):
         if [globID[index], locID[index]] not in duplicates:
             try:
                 _extractEntities(twoDList, globID[index], locID[index], comm[index],
-                    nameStr, nicknameStr, shortF, lastF, total)
+                    nameStr, nicknameStr, shortF, lastF)
             except:
                 raise Exception("Failed to create 2D list of named entities.")
         duplicates.append([globID[index], locID[index]])
         # print(index)
     return twoDList
 
-def _extractEntities(lst, glob, loc, comment, nameStr, nicknameStr, shortFList, shortLList, total):
+def _extractEntities(lst, glob, loc, comment, nameStr, nicknameStr, shortFList, shortLList):
     """
     Returns a 2D list with 1D lists as named entities/categories(person, place, etc.).
     If the comment contains no named entities, return [global ID, local ID]. Function
@@ -114,23 +119,21 @@ def _extractEntities(lst, glob, loc, comment, nameStr, nicknameStr, shortFList, 
     playerNameFile is the file with the basketball players full names, and shortened
     ones.
     """
-    _findName(lst, glob, loc, comment, nameStr, total)
+    addBlank = len(lst)
+    _findName(lst, glob, loc, comment, nameStr)
     _findShortName(lst, glob, loc, comment, shortFList, shortLList)
-    _findNickname(lst, glob, loc, comment, nicknameStr, total)
+    _findNickname(lst, glob, loc, comment, nicknameStr)
     # Add something to the 2D list to signal that the comment has no named entities.
-    if len(lst) == 0:
-        lst.append([glob, loc])
-    elif lst[-1][0] != glob and lst[-1][1] != loc:
+    if len(lst) == addBlank:
         lst.append([glob, loc])
     return lst
 
-def _findName(lst, glob, loc, comment, nameStr, total): #instead of looping through each row in players, make one big, same, regex for each comment (don't make so many regex objects then). Also, this string passed into regex is same for each comment, so can only make that once.
+def _findName(lst, glob, loc, comment, nameStr):
     """
     Finds any names (full, first, and last) in the comment and adds to lst.
     """
     regExObj = re.compile(nameStr, re.IGNORECASE)
     regExList = regExObj.findall(comment)
-    total += len(regExList)
     for entity in regExList:
         lst.append([glob, loc, string.capwords(entity), "U-PER"])
     return lst
@@ -158,7 +161,7 @@ def _findShortName(lst, glob, loc, comment, shortFList, shortLList):
             countLong -= 1
     return lst
 
-def _findNickname(lst, glob, loc, comment, nicknameStr, total):
+def _findNickname(lst, glob, loc, comment, nicknameStr):
     """
     Checks and adds to list any mentions of named entities as nicknames. The
     function ignores case and adds a nickname with the first letters of the word
@@ -166,7 +169,6 @@ def _findNickname(lst, glob, loc, comment, nicknameStr, total):
     """
     regExObj = re.compile(nicknameStr, re.IGNORECASE)
     regExList = regExObj.findall(comment)
-    total += len(regExList)
     for term in regExList:
         lst.append([glob, loc, string.capwords(term), "U-PER"])
     return lst
@@ -179,9 +181,11 @@ def _makeNameStr(fullName, firstName, lastName):
     for termFull in fullName:
         strRegEx += termFull + "|"
     for termFirst in firstName:
-        strRegEx += termFirst + "|"
+        if not pandas.isnull(termFirst):
+            strRegEx += termFirst + "|"
     for termLast in lastName:
-        strRegEx += termLast + "|"
+        if not pandas.isnull(termLast):
+            strRegEx += termLast + "|"
     return strRegEx[:-1]
 
 def _makeNicknameStr(nicknameList):
@@ -213,7 +217,7 @@ def _createList(playerNameFile, colName):
     items = playerNameFile[colName]
     returnList = []
     for index in range(playerNameFile.shape[0]):
-        if type(items[index]) != float:
+        if not pandas.isnull(items[index]):
             lstNames = items[index].split(",")
             returnList += lstNames
     return returnList
